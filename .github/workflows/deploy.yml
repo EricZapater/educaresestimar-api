@@ -49,8 +49,8 @@ jobs:
           script: |
             cd /home/${{ secrets.VPS_USER }}/educaresestimar
 
-            # Login al registry (usa CR_PAT: Personal Access Token amb permisos read:packages)
-            echo ${{ secrets.CR_PAT }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
             # Pull nova imatge
             docker pull ${{ env.IMAGE_NAME }}:latest
