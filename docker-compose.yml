@@ -1,0 +1,21 @@
+services:
+  educaresestimar-api:
+    image: ghcr.io/ericzapater/educaresestimar-api:latest
+    env_file:
+      - .env
+    networks:
+      - web
+      - postgres-networks
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.educaresestimar-api.rule=Host(`api.educaresestimar.zenith.ovh`)"
+      - "traefik.http.routers.educaresestimar-api.entrypoints=websecure"
+      - "traefik.http.routers.educaresestimar-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.educaresestimar-api.loadbalancer.server.port=8000"
+      - "traefik.docker.network=web"
+
+networks:
+  web:
+    external: true
+  postgres-networks:
+    external: true
