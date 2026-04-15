@@ -3,6 +3,10 @@ import subprocess
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
+from app.limiter import limiter
 
 # Configure logging
 logging.basicConfig(
@@ -25,6 +29,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @app.middleware("http")
@@ -51,8 +58,9 @@ async def startup():
 
 
 # Register routers
-from app.routers import session_types, slots, reservations  # noqa: E402
+from app.routers import session_types, slots, reservations, auth  # noqa: E402
 
+app.include_router(auth.router)
 app.include_router(session_types.router)
 app.include_router(slots.router)
 app.include_router(reservations.router)

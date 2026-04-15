@@ -7,7 +7,7 @@ from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.auth import require_api_key
+from app.auth import get_current_user
 from app.database import get_db
 from app.models.reservation import Reservation
 from app.models.session_type import SessionType
@@ -73,7 +73,7 @@ async def create_reservation(
 @router.get("", response_model=list[ReservationOut])
 async def list_reservations(
     db: AsyncSession = Depends(get_db),
-    _: str = Depends(require_api_key),
+    current_user: dict = Depends(get_current_user),
     from_date: date | None = Query(None, alias="from", description="Data inici (YYYY-MM-DD)"),
     to_date: date | None = Query(None, alias="to", description="Data fi (YYYY-MM-DD)"),
 ):
@@ -103,7 +103,7 @@ async def update_reservation(
     reservation_id: uuid.UUID,
     payload: ReservationUpdate,
     db: AsyncSession = Depends(get_db),
-    _: str = Depends(require_api_key),
+    current_user: dict = Depends(get_current_user),
 ):
     """Actualitza status i/o slot_id d'una reserva."""
     logger.info("PATCH /api/reservations/%s", reservation_id)
@@ -130,7 +130,15 @@ async def update_reservation(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Slot not found",
             )
+        
+        # Alliberar el slot antic si s'ha canviat
+        if reservation.slot_id and reservation.slot_id != payload.slot_id:
+            old_slot = await db.get(Slot, reservation.slot_id)
+            if old_slot:
+                old_slot.is_available = True
+
         reservation.slot_id = payload.slot_id
+        slot.is_available = False
 
     await db.flush()
     await db.refresh(reservation, attribute_names=["session_type", "slot"])

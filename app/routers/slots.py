@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import require_api_key
+from app.auth import get_current_user
 from app.database import get_db
 from app.models.slot import Slot
 from app.models.reservation import Reservation
@@ -42,7 +42,7 @@ async def list_available_slots(
 async def create_slot(
     payload: SlotCreate,
     db: AsyncSession = Depends(get_db),
-    _: str = Depends(require_api_key),
+    current_user: dict = Depends(get_current_user),
 ):
     """Crea una nova franja horària. Retorna 409 si ja existeix (date+start_time)."""
     logger.info("POST /api/slots date=%s start=%s", payload.date, payload.start_time)
@@ -74,7 +74,7 @@ async def create_slot(
 async def delete_slot(
     slot_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: str = Depends(require_api_key),
+    current_user: dict = Depends(get_current_user),
 ):
     """Elimina una franja. Retorna 409 si té reserves associades."""
     logger.info("DELETE /api/slots/%s", slot_id)

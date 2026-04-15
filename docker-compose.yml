@@ -5,7 +5,7 @@ services:
       - .env
     networks:
       - web
-      - postgres-networks
+      - postgres-network
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.educaresestimar-api.rule=Host(`api.educaresestimar.zenith.ovh`)"
@@ -17,5 +17,5 @@ services:
 networks:
   web:
     external: true
-  postgres-networks:
+  postgres-network:
     external: true

@@ -6,3 +6,7 @@ alembic
 pydantic
 pydantic-settings
 python-dotenv
+pyjwt
+passlib[bcrypt]
+bcrypt
+slowapi

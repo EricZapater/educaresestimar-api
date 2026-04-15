@@ -1,18 +1,50 @@
 import os
+from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, HTTPException, Security, status
-from fastapi.security import APIKeyHeader
+import jwt
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from passlib.context import CryptContext
 
-API_KEY = os.getenv("API_KEY", "canvia_aquesta_clau")
+JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-key-change-it")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRES_MINUTES = 24 * 60  # 24 hours
 
-api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+security = HTTPBearer()
 
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
 
-async def require_api_key(api_key: str | None = Security(api_key_header)) -> str:
-    """Dependency that validates the X-API-Key header against the API_KEY env var."""
-    if api_key is None or api_key != API_KEY:
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict) -> str:
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRES_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return encoded_jwt
+
+def decode_access_token(token: str) -> dict:
+    try:
+        decoded_token = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return decoded_token
+    except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API key",
+            detail="Token has expired",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-    return api_key
+    except jwt.PyJWTError:  # type: ignore
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    """Dependency that validates the Bearer token."""
+    token = credentials.credentials
+    user_data = decode_access_token(token)
+    return user_data
