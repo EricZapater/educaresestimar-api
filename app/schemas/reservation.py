@@ -1,24 +1,21 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.schemas.session_type import SessionTypeOut
 from app.schemas.slot import SlotOut
 
 
 class ReservationCreate(BaseModel):
-    client_name: str
-    client_phone: str
-    client_email: str | None = None
+    client_name: str = Field(alias="name")
+    client_phone: str = Field(alias="phone")
+    client_email: str | None = Field(default=None, alias="email")
     session_type_id: uuid.UUID
     slot_id: uuid.UUID | None = None
     message: str | None = None
 
-
-class ReservationCreated(BaseModel):
-    id: uuid.UUID
-    status: str
+    model_config = {"populate_by_name": True}
 
 
 class ReservationUpdate(BaseModel):
@@ -28,9 +25,9 @@ class ReservationUpdate(BaseModel):
 
 class ReservationOut(BaseModel):
     id: uuid.UUID
-    client_name: str
-    client_phone: str
-    client_email: str | None = None
+    client_name: str = Field(serialization_alias="name")
+    client_phone: str = Field(serialization_alias="phone")
+    client_email: str | None = Field(default=None, serialization_alias="email")
     session_type_id: uuid.UUID
     slot_id: uuid.UUID | None = None
     message: str | None = None
@@ -39,4 +36,4 @@ class ReservationOut(BaseModel):
     session_type: SessionTypeOut | None = None
     slot: SlotOut | None = None
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}

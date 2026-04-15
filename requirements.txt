@@ -7,7 +7,6 @@ pydantic
 pydantic-settings
 python-dotenv
 pyjwt
-passlib[bcrypt]
 bcrypt
 slowapi
 email-validator

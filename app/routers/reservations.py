@@ -14,7 +14,6 @@ from app.models.session_type import SessionType
 from app.models.slot import Slot
 from app.schemas.reservation import (
     ReservationCreate,
-    ReservationCreated,
     ReservationOut,
     ReservationUpdate,
 )
@@ -25,7 +24,7 @@ router = APIRouter(prefix="/api/reservations", tags=["Reservations"])
 VALID_STATUSES = {"pending", "confirmed", "cancelled"}
 
 
-@router.post("", response_model=ReservationCreated, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=ReservationOut, status_code=status.HTTP_201_CREATED)
 async def create_reservation(
     payload: ReservationCreate,
     db: AsyncSession = Depends(get_db),
@@ -65,9 +64,9 @@ async def create_reservation(
     )
     db.add(reservation)
     await db.flush()
-    await db.refresh(reservation)
+    await db.refresh(reservation, attribute_names=["session_type", "slot"])
 
-    return ReservationCreated(id=reservation.id, status=reservation.status)
+    return reservation
 
 
 @router.get("", response_model=list[ReservationOut])
