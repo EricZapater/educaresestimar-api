@@ -60,6 +60,16 @@ jobs:
             docker compose rm -f educaresestimar-api
             docker compose up -d educaresestimar-api
 
+            # Esperar a que la mateixa API intenti de bootar
+            sleep 5
+            
+            STATUS=$(docker compose ps -q educaresestimar-api | xargs docker inspect -f '{{.State.Status}}')
+            if [ "$STATUS" != "running" ]; then
+              echo "Error: Container crashed during startup. Status: $STATUS"
+              docker compose logs educaresestimar-api
+              exit 1
+            fi
+
             # Neteja imatges antigues
             docker image prune -f
 
