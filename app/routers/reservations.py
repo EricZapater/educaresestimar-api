@@ -5,7 +5,7 @@ from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.auth import get_current_user
 from app.database import get_db
@@ -146,7 +146,11 @@ async def list_reservations(
 
     query = (
         select(Reservation)
-        .options(joinedload(Reservation.session_type), joinedload(Reservation.slot))
+        .options(
+            joinedload(Reservation.session_type),
+            joinedload(Reservation.slot),
+            selectinload(Reservation.booked_slots)
+        )
         .order_by(Reservation.created_at.desc())
     )
 

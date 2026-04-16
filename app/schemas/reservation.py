@@ -35,5 +35,6 @@ class ReservationOut(BaseModel):
     created_at: datetime
     session_type: SessionTypeOut | None = None
     slot: SlotOut | None = None
+    booked_slots: list[SlotOut] = []
 
     model_config = {"from_attributes": True, "populate_by_name": True}
