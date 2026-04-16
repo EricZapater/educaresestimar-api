@@ -125,7 +125,7 @@ async def create_reservation(
             client_email=reservation.client_email,
             client_phone=reservation.client_phone,
             message=reservation.message,
-            session_title=reservation.session_type.title,
+            session_title=reservation.session_type.name,
             slot_start=reservation.slot.start_time if reservation.slot else None,
             admin_emails=admin_emails,
         )
