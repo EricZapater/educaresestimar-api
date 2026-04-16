@@ -30,7 +30,7 @@ async def list_available_slots(
             and_(
                 Slot.date >= from_date,
                 Slot.date <= to_date,
-                Slot.is_available == True,
+                # Slot.is_available == True,
             )
         )
         .order_by(Slot.date, Slot.start_time)
