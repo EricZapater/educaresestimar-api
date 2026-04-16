@@ -1,11 +1,19 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, Text, text
+from sqlalchemy import CheckConstraint, ForeignKey, Text, text, Table, Column
 from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+
+reservation_slots = Table(
+    "reservation_slots",
+    Base.metadata,
+    Column("reservation_id", UUID(as_uuid=True), ForeignKey("reservations.id", ondelete="CASCADE"), primary_key=True),
+    Column("slot_id", UUID(as_uuid=True), ForeignKey("available_slots.id", ondelete="CASCADE"), primary_key=True),
+)
 
 
 class Reservation(Base):
@@ -44,4 +52,6 @@ class Reservation(Base):
 
     # Relationships for JOIN queries
     session_type = relationship("SessionType", lazy="joined")
-    slot = relationship("Slot", lazy="joined")
+    slot = relationship("Slot", lazy="joined")  # Primer slot / original
+    booked_slots = relationship("Slot", secondary=reservation_slots, lazy="selectin")
+

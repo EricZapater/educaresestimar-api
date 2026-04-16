@@ -105,12 +105,13 @@ async def create_reservation(
         slot_id=payload.slot_id,
         message=payload.message,
     )
-    db.add(reservation)
     
     if slots_to_occupy:
+        reservation.booked_slots = slots_to_occupy
         for s in slots_to_occupy:
             s.is_available = False
 
+    db.add(reservation)
     await db.flush()
     await db.refresh(reservation, attribute_names=["session_type", "slot"])
 
@@ -185,10 +186,10 @@ async def update_reservation(
 
     # 1. Obtenir slots actualment ocupats per alliberar-los temporalment
     currently_occupying = (reservation.status != "cancelled" and reservation.slot_id is not None)
-    if currently_occupying and reservation.slot:
-        old_slots = await _get_slots_to_occupy(db, reservation.slot, reservation.session_type)
-        for s in old_slots:
+    if currently_occupying:
+        for s in reservation.booked_slots:
             s.is_available = True
+        reservation.booked_slots.clear()
 
     # 2. Aplicar els canvis del payload
     if payload.status is not None:
@@ -221,6 +222,8 @@ async def update_reservation(
             )
         for s in new_slots:
             s.is_available = False
+            
+        reservation.booked_slots = new_slots
 
         # Lògica d'enviament de correu al client
         is_now_confirmed = reservation.status == "confirmed"

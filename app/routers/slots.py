@@ -87,10 +87,11 @@ async def delete_slot(
         )
 
     # Check if any reservations reference this slot
+    from app.models.reservation import reservation_slots
     reservations = await db.execute(
-        select(Reservation).where(Reservation.slot_id == slot_id).limit(1)
+        select(reservation_slots).where(reservation_slots.c.slot_id == slot_id).limit(1)
     )
-    if reservations.scalar_one_or_none() is not None:
+    if reservations.first() is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Cannot delete slot with associated reservations",
