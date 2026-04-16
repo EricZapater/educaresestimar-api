@@ -103,3 +103,62 @@ def send_reservation_notification(
         logger.info(f"Notification email sent to {len(admin_emails)} admins.")
     except Exception as e:
         logger.error(f"Failed to send email: {str(e)}")
+
+def send_client_confirmation_email(
+    client_name: str,
+    client_email: str,
+    session_title: str,
+    date_str: str,
+    start_time: str,
+    end_time: str
+):
+    """
+    Envia un correu electrònic al client confirmant la reserva i indicant els detalls de temps.
+    """
+    if not SMTP_HOST or not SMTP_FROM_EMAIL:
+        logger.warning("SMTP configuration not fully set. Skipping client email.")
+        return
+
+    msg = EmailMessage()
+    msg["Subject"] = "Confirmació de Reserva"
+    msg["From"] = SMTP_FROM_EMAIL
+    msg["To"] = client_email
+
+    body_html = f"""
+    <html>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <h2 style="color: #27ae60;">Reserva Confirmada!</h2>
+        <p>Hola <b>{client_name}</b>,</p>
+        <p>Ens complau confirmar-te que la teva reserva per a la sessió <b>{session_title}</b> ha estat confirmada.</p>
+        
+        <div style="background-color: #f9f9f9; padding: 15px; border-left: 4px solid #27ae60; margin: 20px 0;">
+            <p style="margin: 5px 0;"><b>Data:</b> {date_str}</p>
+            <p style="margin: 5px 0;"><b>Hora d'inici:</b> {start_time}</p>
+            <p style="margin: 5px 0;"><b>Hora de finalització:</b> {end_time}</p>
+        </div>
+        
+        <p>T'hi esperem!</p>
+        <p style="margin-top: 30px; font-size: 0.9em; color: #7f8c8d;">Aquest és un missatge automàtic.</p>
+      </body>
+    </html>
+    """
+
+    msg.set_content(f"Hola {client_name}, la teva reserva per a {session_title} el dia {date_str} de {start_time} a {end_time} està confirmada.")
+    msg.add_alternative(body_html, subtype='html')
+
+    try:
+        port = int(SMTP_PORT)
+        if port == 465:
+            with smtplib.SMTP_SSL(SMTP_HOST, port) as server:
+                if SMTP_USER and SMTP_PASSWORD:
+                    server.login(SMTP_USER, SMTP_PASSWORD)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(SMTP_HOST, port) as server:
+                server.starttls()
+                if SMTP_USER and SMTP_PASSWORD:
+                    server.login(SMTP_USER, SMTP_PASSWORD)
+                server.send_message(msg)
+        logger.info(f"Confirmation email sent to client {client_email}.")
+    except Exception as e:
+        logger.error(f"Failed to send confirmation email to client: {str(e)}")

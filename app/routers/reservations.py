@@ -13,7 +13,7 @@ from app.models.reservation import Reservation
 from app.models.session_type import SessionType
 from app.models.slot import Slot
 from app.models.admin_user import AdminUser
-from app.email import send_reservation_notification
+from app.email import send_reservation_notification, send_client_confirmation_email
 from app.schemas.reservation import (
     ReservationCreate,
     ReservationOut,
@@ -165,6 +165,7 @@ async def list_reservations(
 async def update_reservation(
     reservation_id: uuid.UUID,
     payload: ReservationUpdate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -177,6 +178,10 @@ async def update_reservation(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Reservation not found",
         )
+
+    # Estat previ per decidir si cal notificar al client
+    was_already_confirmed = reservation.status == "confirmed"
+    original_slot_id = reservation.slot_id
 
     # 1. Obtenir slots actualment ocupats per alliberar-los temporalment
     currently_occupying = (reservation.status != "cancelled" and reservation.slot_id is not None)
@@ -216,6 +221,26 @@ async def update_reservation(
             )
         for s in new_slots:
             s.is_available = False
+
+        # Lògica d'enviament de correu al client
+        is_now_confirmed = reservation.status == "confirmed"
+        status_just_confirmed = is_now_confirmed and not was_already_confirmed
+        slot_changed_while_confirmed = is_now_confirmed and was_already_confirmed and reservation.slot_id != original_slot_id
+        
+        if (status_just_confirmed or slot_changed_while_confirmed) and reservation.client_email and new_slots:
+            date_str = new_slots[0].date.strftime("%d/%m/%Y")
+            start_time_str = new_slots[0].start_time.strftime("%H:%M")
+            end_time_str = new_slots[-1].end_time.strftime("%H:%M")
+            
+            background_tasks.add_task(
+                send_client_confirmation_email,
+                client_name=reservation.client_name,
+                client_email=reservation.client_email,
+                session_title=reservation.session_type.name,
+                date_str=date_str,
+                start_time=start_time_str,
+                end_time=end_time_str
+            )
 
     await db.flush()
     await db.refresh(reservation, attribute_names=["session_type", "slot"])
