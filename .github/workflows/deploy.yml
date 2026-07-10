@@ -84,4 +84,4 @@ jobs:
           script: |
             cd /home/${{ secrets.VPS_USER }}/educaresestimar
             docker compose ps educaresestimar-api
-            echo "🔗 API disponible a: https://api.educaresestimar.zenith.ovh/docs"
+            echo "🔗 API disponible a: https://api.educaresestimar.cat/docs"

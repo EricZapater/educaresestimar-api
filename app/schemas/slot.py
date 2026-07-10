@@ -19,3 +19,8 @@ class SlotOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class SlotBulkCreate(BaseModel):
+    slots: list[SlotCreate]
+

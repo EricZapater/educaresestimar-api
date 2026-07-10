@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 from sqlalchemy import select, and_
@@ -18,7 +18,9 @@ from app.schemas.reservation import (
     ReservationCreate,
     ReservationOut,
     ReservationUpdate,
+    ReservationRecurringCreate,
 )
+from app.utils import is_slot_blocked
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/reservations", tags=["Reservations"])
@@ -69,8 +71,16 @@ async def create_reservation(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
-    """Crea una nova reserva (endpoint públic)."""
+    """Crea una nova reserva (endpoint públic o manual)."""
     logger.info("POST /api/reservations client=%s", payload.client_name)
+
+    # Validate status if provided
+    status_to_use = payload.status or "pending"
+    if status_to_use not in VALID_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid status. Must be one of: {', '.join(sorted(VALID_STATUSES))}",
+        )
 
     # Validate session_type_id exists
     session_type = await db.get(SessionType, payload.session_type_id)
@@ -104,6 +114,7 @@ async def create_reservation(
         session_type_id=payload.session_type_id,
         slot_id=payload.slot_id,
         message=payload.message,
+        status=status_to_use,
     )
     
     if slots_to_occupy:
@@ -115,11 +126,27 @@ async def create_reservation(
     await db.flush()
     await db.refresh(reservation, attribute_names=["session_type", "slot"])
 
+    # Enviar correu de confirmació al client directament si s'ha creat com a confirmat
+    if reservation.status == "confirmed" and reservation.client_email and slots_to_occupy:
+        date_str = slots_to_occupy[0].date.strftime("%d/%m/%Y")
+        start_time_str = slots_to_occupy[0].start_time.strftime("%H:%M")
+        end_time_str = slots_to_occupy[-1].end_time.strftime("%H:%M")
+        background_tasks.add_task(
+            send_client_confirmation_email,
+            client_name=reservation.client_name,
+            client_email=reservation.client_email,
+            session_title=session_type.name,
+            date_str=date_str,
+            start_time=start_time_str,
+            end_time=end_time_str
+        )
+
     # Obtenir els correus dels administradors
     admins_result = await db.execute(select(AdminUser.email))
     admin_emails = list(admins_result.scalars().all())
 
-    if admin_emails:
+    # Només enviar correu de nova reserva a l'admin si és una reserva feta per client (estat pending)
+    if admin_emails and reservation.status == "pending":
         background_tasks.add_task(
             send_reservation_notification,
             client_name=reservation.client_name,
@@ -132,6 +159,123 @@ async def create_reservation(
         )
 
     return reservation
+
+
+@router.post("/recurring", response_model=list[ReservationOut], status_code=status.HTTP_201_CREATED)
+async def create_recurring_reservation(
+    payload: ReservationRecurringCreate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Crea reserves periòdiques (setmanal o quinzenal) per a un client (manual per part de l'educador)."""
+    logger.info("POST /api/reservations/recurring client=%s, occurrences=%s", payload.client_name, payload.occurrences)
+    
+    session_type = await db.get(SessionType, payload.session_type_id)
+    if session_type is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session type not found",
+        )
+        
+    duration = session_type.duration_minutes or 30
+    
+    # 1. Calcular les dates de les ocurrències
+    dates = []
+    curr_date = payload.start_date
+    delta_days = 7 if payload.recurrence == "weekly" else 14
+    for _ in range(payload.occurrences):
+        dates.append(curr_date)
+        curr_date += timedelta(days=delta_days)
+        
+    created_reservations = []
+    
+    # Helper to get or create a slot, checking if it is blocked
+    async def get_or_create_slot(d: date, t: time) -> Slot:
+        stmt = select(Slot).where(and_(Slot.date == d, Slot.start_time == t))
+        res = await db.execute(stmt)
+        slot = res.scalar_one_or_none()
+        if not slot:
+            if is_slot_blocked(d, t):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"La data {d.strftime('%d/%m/%Y')} a les {t.strftime('%H:%M')} correspon a una franja bloquejada.",
+                )
+            
+            # Crear el slot
+            minutes = t.hour * 60 + t.minute
+            end_minutes = minutes + 30
+            end_h, end_m = divmod(end_minutes, 60)
+            end_t = time(end_h, end_m)
+            
+            slot = Slot(date=d, start_time=t, end_time=end_t, is_available=True)
+            db.add(slot)
+            await db.flush()
+        return slot
+        
+    # 2. Per a cada ocurrència, verificar/crear els slots necessaris
+    for occurrence_date in dates:
+        slots_needed = []
+        curr_mins = payload.start_time.hour * 60 + payload.start_time.minute
+        accumulated = 0
+        while accumulated < duration:
+            h, m = divmod(curr_mins, 60)
+            slot_start_t = time(h, m)
+            
+            slot = await get_or_create_slot(occurrence_date, slot_start_t)
+            slots_needed.append(slot)
+            
+            curr_mins += 30
+            accumulated += 30
+            
+        # Comprovar si algun slot no està disponible
+        for s in slots_needed:
+            if not s.is_available:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"El slot del dia {occurrence_date.strftime('%d/%m/%Y')} a les {s.start_time.strftime('%H:%M')} ja està reservat o no disponible.",
+                )
+                
+        # Crear la reserva
+        reservation = Reservation(
+            client_name=payload.client_name,
+            client_phone=payload.client_phone,
+            client_email=payload.client_email,
+            session_type_id=payload.session_type_id,
+            slot_id=slots_needed[0].id,
+            message=payload.message,
+            status="confirmed",
+        )
+        
+        reservation.booked_slots = slots_needed
+        for s in slots_needed:
+            s.is_available = False
+            
+        db.add(reservation)
+        created_reservations.append(reservation)
+        
+    await db.flush()
+    
+    # 3. Enviar correus de confirmació de cada ocurrència
+    for res in created_reservations:
+        await db.refresh(res, attribute_names=["session_type", "slot", "booked_slots"])
+        if res.client_email and res.booked_slots:
+            date_str = res.booked_slots[0].date.strftime("%d/%m/%Y")
+            start_time_str = res.booked_slots[0].start_time.strftime("%H:%M")
+            end_time_str = res.booked_slots[-1].end_time.strftime("%H:%M")
+            
+            background_tasks.add_task(
+                send_client_confirmation_email,
+                client_name=res.client_name,
+                client_email=res.client_email,
+                session_title=res.session_type.name,
+                date_str=date_str,
+                start_time=start_time_str,
+                end_time=end_time_str
+            )
+            
+    return created_reservations
+
 
 
 @router.get("", response_model=list[ReservationOut])
