@@ -124,7 +124,7 @@ async def create_reservation(
 
     db.add(reservation)
     await db.flush()
-    await db.refresh(reservation, attribute_names=["session_type", "slot"])
+    await db.refresh(reservation, attribute_names=["session_type", "slot", "booked_slots"])
 
     # Enviar correu de confirmació al client directament si s'ha creat com a confirmat
     if reservation.status == "confirmed" and reservation.client_email and slots_to_occupy:
