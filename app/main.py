@@ -21,10 +21,15 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS — permet tots els orígens per facilitar integració amb frontend
+# CORS — permet els orígens específics de producció i desenvolupament local
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://educaresestimar.cat",
+        "https://www.educaresestimar.cat",
+        "http://localhost:5173",
+        "http://localhost:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
