@@ -48,13 +48,6 @@ async def create_slot(
     """Crea una nova franja horària. Retorna 409 si ja existeix (date+start_time)."""
     logger.info("POST /api/slots date=%s start=%s", payload.date, payload.start_time)
 
-    # Check if slot is blocked
-    if is_slot_blocked(payload.date, payload.start_time):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="La franja horària triada correspon a un període bloquejat de l'agenda.",
-        )
-
     # Check for existing slot with same date + start_time
     existing = await db.execute(
         select(Slot).where(

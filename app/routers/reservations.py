@@ -190,17 +190,12 @@ async def create_recurring_reservation(
         
     created_reservations = []
     
-    # Helper to get or create a slot, checking if it is blocked
+    # Helper to get or create a slot
     async def get_or_create_slot(d: date, t: time) -> Slot:
         stmt = select(Slot).where(and_(Slot.date == d, Slot.start_time == t))
         res = await db.execute(stmt)
         slot = res.scalar_one_or_none()
         if not slot:
-            if is_slot_blocked(d, t):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"La data {d.strftime('%d/%m/%Y')} a les {t.strftime('%H:%M')} correspon a una franja bloquejada.",
-                )
             
             # Crear el slot
             minutes = t.hour * 60 + t.minute
