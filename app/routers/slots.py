@@ -31,12 +31,19 @@ async def list_available_slots(
             and_(
                 Slot.date >= from_date,
                 Slot.date <= to_date,
-                # Slot.is_available == True,
             )
         )
         .order_by(Slot.date, Slot.start_time)
     )
-    return result.scalars().all()
+    slots = list(result.scalars().all())
+
+    # Sincronitzar la disponibilitat dinàmica de cada slot segons les reserves multi-client
+    from app.routers.reservations import _recalculate_slot_availability
+    for s in slots:
+        await _recalculate_slot_availability(db, s)
+    await db.commit()
+
+    return slots
 
 
 @router.post("", response_model=SlotOut, status_code=status.HTTP_201_CREATED)

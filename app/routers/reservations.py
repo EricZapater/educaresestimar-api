@@ -65,6 +65,57 @@ async def _get_slots_to_occupy(db: AsyncSession, start_slot: Slot, session_type:
     return slots_to_occupy
 
 
+async def _recalculate_slot_availability(
+    db: AsyncSession,
+    slot: Slot,
+    exclude_reservation_id: uuid.UUID | None = None,
+):
+    """
+    Recalcula is_available d'un slot en funció de les reserves actives que l'ocupen.
+    - Si no hi ha reserves actives (status != 'cancelled'): is_available = True
+    - Si hi ha alguna reserva NO compartida (ni el tipus ni la reserva són compartits): is_available = False
+    - Si totes les reserves són compartides: is_available = (num_reserves < max_clients)
+    """
+    query = (
+        select(Reservation, SessionType)
+        .outerjoin(reservation_slots, reservation_slots.c.reservation_id == Reservation.id)
+        .join(SessionType, SessionType.id == Reservation.session_type_id)
+        .where(
+            or_(reservation_slots.c.slot_id == slot.id, Reservation.slot_id == slot.id),
+            Reservation.status != "cancelled",
+        )
+    )
+    if exclude_reservation_id is not None:
+        query = query.where(Reservation.id != exclude_reservation_id)
+
+    res = await db.execute(query)
+    rows = res.all()
+
+    if not rows:
+        slot.is_available = True
+        return
+
+    has_non_shared = False
+    max_clients_candidates = []
+
+    for r, st in rows:
+        is_r_shared = bool(r.is_shared or st.is_shared)
+        if not is_r_shared:
+            has_non_shared = True
+            break
+        limit = st.max_clients if (st.max_clients and st.max_clients > 1) else (2 if r.is_shared else 1)
+        max_clients_candidates.append(limit)
+
+    if has_non_shared:
+        slot.is_available = False
+        return
+
+    # Totes són compartides
+    max_clients = min(max_clients_candidates) if max_clients_candidates else 1
+    current_occupants = len(rows)
+    slot.is_available = (current_occupants < max_clients)
+
+
 async def _update_slots_occupancy(
     db: AsyncSession,
     slots: list[Slot],
@@ -73,77 +124,7 @@ async def _update_slots_occupancy(
 ):
     """Actualitza la disponibilitat dels slots quan són ocupats per una sessió."""
     for s in slots:
-        if not is_shared:
-            s.is_available = False
-        else:
-            query = (
-                select(func.count(distinct(Reservation.id)))
-                .outerjoin(reservation_slots, reservation_slots.c.reservation_id == Reservation.id)
-                .where(
-                    or_(reservation_slots.c.slot_id == s.id, Reservation.slot_id == s.id),
-                    Reservation.status == "confirmed",
-                )
-            )
-            res = await db.execute(query)
-            confirmed_count = res.scalar() or 0
-            max_clients = session_type.max_clients or 1
-            if confirmed_count >= max_clients:
-                s.is_available = False
-            else:
-                s.is_available = True
-
-
-async def _recalculate_slot_availability(
-    db: AsyncSession,
-    slot: Slot,
-    exclude_reservation_id: uuid.UUID | None = None,
-):
-    """Recalcula is_available d'un slot quan s'allibera o es cancel·la una reserva."""
-    non_shared_conditions = [
-        or_(reservation_slots.c.slot_id == slot.id, Reservation.slot_id == slot.id),
-        Reservation.status != "cancelled",
-        or_(
-            Reservation.is_shared == False,
-            and_(Reservation.is_shared.is_(None), SessionType.is_shared == False),
-        ),
-    ]
-    if exclude_reservation_id is not None:
-        non_shared_conditions.append(Reservation.id != exclude_reservation_id)
-
-    non_shared_query = (
-        select(func.count(distinct(Reservation.id)))
-        .outerjoin(reservation_slots, reservation_slots.c.reservation_id == Reservation.id)
-        .outerjoin(SessionType, SessionType.id == Reservation.session_type_id)
-        .where(and_(*non_shared_conditions))
-    )
-    res_non_shared = await db.execute(non_shared_query)
-    non_shared_count = res_non_shared.scalar() or 0
-    if non_shared_count > 0:
-        slot.is_available = False
-        return
-
-    shared_conditions = [
-        or_(reservation_slots.c.slot_id == slot.id, Reservation.slot_id == slot.id),
-        Reservation.status == "confirmed",
-    ]
-    if exclude_reservation_id is not None:
-        shared_conditions.append(Reservation.id != exclude_reservation_id)
-
-    shared_query = (
-        select(
-            func.count(distinct(Reservation.id)),
-            func.min(SessionType.max_clients),
-        )
-        .outerjoin(reservation_slots, reservation_slots.c.reservation_id == Reservation.id)
-        .outerjoin(SessionType, SessionType.id == Reservation.session_type_id)
-        .where(and_(*shared_conditions))
-    )
-    res_shared = await db.execute(shared_query)
-    row = res_shared.first()
-    confirmed_count = row[0] if row and row[0] is not None else 0
-    min_max_clients = row[1] if row and row[1] is not None else 1
-    max_clients = min_max_clients or 1
-    slot.is_available = (confirmed_count < max_clients)
+        await _recalculate_slot_availability(db, s)
 
 
 @router.post("", response_model=ReservationOut, status_code=status.HTTP_201_CREATED)
@@ -210,6 +191,7 @@ async def create_reservation(
         db.add(reservation)
         await db.flush()
 
+    await db.commit()
     await db.refresh(reservation, attribute_names=["session_type", "slot", "booked_slots"])
 
     # Enviar correu de confirmació al client directament si s'ha creat com a confirmat
