@@ -1,0 +1,14 @@
+app/routers/reservations.py
+  h_42175f19913982 82-88,93,101-106,113,127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "70a4d4fe38b3f40a5ec448b0109c8c438cb554c2",
+  "prompts": {},
+  "humans": {
+    "h_42175f19913982": {
+      "author": "Èric Zapater <ericzm@ext.inditex.com>"
+    }
+  }
+}
