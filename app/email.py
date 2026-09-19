@@ -162,3 +162,75 @@ def send_client_confirmation_email(
         logger.info(f"Confirmation email sent to client {client_email}.")
     except Exception as e:
         logger.error(f"Failed to send confirmation email to client: {str(e)}")
+
+def send_client_cancellation_email(
+    client_name: str,
+    client_email: str,
+    session_title: str,
+    date_str: str | None = None,
+    start_time: str | None = None,
+):
+    """
+    Envia un correu electrònic al client notificant que la seva sol·licitud/reserva no ha pogut ser acceptada o ha estat cancel·lada.
+    """
+    if not SMTP_HOST or not SMTP_FROM_EMAIL:
+        logger.warning("SMTP configuration not fully set. Skipping client cancellation email.")
+        return
+
+    msg = EmailMessage()
+    msg["Subject"] = "Estat de la teva sol·licitud de reserva - Educa'ns per estimar-los"
+    msg["From"] = SMTP_FROM_EMAIL
+    msg["To"] = client_email
+
+    time_info_html = ""
+    if date_str and start_time:
+        time_info_html = f"""
+        <div style="background-color: #fcfcfc; padding: 12px 15px; border-left: 4px solid #e74c3c; margin: 15px 0;">
+            <p style="margin: 4px 0;"><b>Sessió sol·licitada:</b> {session_title}</p>
+            <p style="margin: 4px 0;"><b>Data i hora:</b> {date_str} a les {start_time}</p>
+        </div>
+        """
+    else:
+        time_info_html = f"""
+        <div style="background-color: #fcfcfc; padding: 12px 15px; border-left: 4px solid #e74c3c; margin: 15px 0;">
+            <p style="margin: 4px 0;"><b>Sessió sol·licitada:</b> {session_title}</p>
+        </div>
+        """
+
+    body_html = f"""
+    <html>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <h2 style="color: #c0392b;">Sol·licitud de Reserva no disponible</h2>
+        <p>Hola <b>{client_name}</b>,</p>
+        <p>T'informem que, per motius de disponibilitat d'agenda, no ha estat possible acceptar la teva sol·licitud per a la classe sol·licitada.</p>
+        
+        {time_info_html}
+        
+        <p>Pots tornar a accedir a la nostra pàgina web de reserves per escollir una altra data o franja horària que et vagi millor, o bé posar-te en contacte directe amb nosaltres si tens qualsevol dubte.</p>
+        
+        <p style="margin-top: 20px;">Disculpa les molèsties i moltes gràcies pel teu interès!</p>
+        <p style="margin-top: 30px; font-size: 0.9em; color: #7f8c8d;">Educa'ns per estimar-los · Roger</p>
+      </body>
+    </html>
+    """
+
+    msg.set_content(f"Hola {client_name}, t'informem que per motius d'agenda no ha estat possible acceptar la teva sol·licitud per a la sessió {session_title}. Pots tornar a consultar el nostre calendari per escollir una altra franja disponible.")
+    msg.add_alternative(body_html, subtype='html')
+
+    try:
+        port = int(SMTP_PORT)
+        if port == 465:
+            with smtplib.SMTP_SSL(SMTP_HOST, port) as server:
+                if SMTP_USER and SMTP_PASSWORD:
+                    server.login(SMTP_USER, SMTP_PASSWORD)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(SMTP_HOST, port) as server:
+                server.starttls()
+                if SMTP_USER and SMTP_PASSWORD:
+                    server.login(SMTP_USER, SMTP_PASSWORD)
+                server.send_message(msg)
+        logger.info(f"Cancellation email sent to client {client_email}.")
+    except Exception as e:
+        logger.error(f"Failed to send cancellation email to client: {str(e)}")
+

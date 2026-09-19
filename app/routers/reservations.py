@@ -13,7 +13,11 @@ from app.models.reservation import Reservation, reservation_slots
 from app.models.session_type import SessionType
 from app.models.slot import Slot
 from app.models.admin_user import AdminUser
-from app.email import send_reservation_notification, send_client_confirmation_email
+from app.email import (
+    send_reservation_notification,
+    send_client_confirmation_email,
+    send_client_cancellation_email,
+)
 from app.schemas.reservation import (
     ReservationCreate,
     ReservationOut,
@@ -405,6 +409,7 @@ async def update_reservation(
 
     # Estat previ per decidir si cal notificar al client
     was_already_confirmed = reservation.status == "confirmed"
+    was_already_cancelled = reservation.status == "cancelled"
     original_slot_id = reservation.slot_id
     old_slots = list(reservation.booked_slots)
 
@@ -477,6 +482,27 @@ async def update_reservation(
                 start_time=start_time_str,
                 end_time=end_time_str
             )
+
+    # Lògica d'enviament de correu de cancel·lació / rebuig al client
+    is_now_cancelled = reservation.status == "cancelled"
+    if is_now_cancelled and not was_already_cancelled and reservation.client_email:
+        date_str = None
+        start_time_str = None
+        if old_slots:
+            date_str = old_slots[0].date.strftime("%d/%m/%Y")
+            start_time_str = old_slots[0].start_time.strftime("%H:%M")
+        elif reservation.slot:
+            date_str = reservation.slot.date.strftime("%d/%m/%Y")
+            start_time_str = reservation.slot.start_time.strftime("%H:%M")
+
+        background_tasks.add_task(
+            send_client_cancellation_email,
+            client_name=reservation.client_name,
+            client_email=reservation.client_email,
+            session_title=reservation.session_type.name,
+            date_str=date_str,
+            start_time=start_time_str,
+        )
 
     await db.commit()
     await db.refresh(reservation, attribute_names=["session_type", "slot", "booked_slots"])
