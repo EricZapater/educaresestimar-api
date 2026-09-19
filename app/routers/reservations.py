@@ -484,7 +484,7 @@ async def update_reservation(
                 end_time=end_time_str
             )
 
-    await db.flush()
+    await db.commit()
     await db.refresh(reservation, attribute_names=["session_type", "slot", "booked_slots"])
 
     return reservation
