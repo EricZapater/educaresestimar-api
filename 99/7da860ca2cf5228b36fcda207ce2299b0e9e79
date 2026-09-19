@@ -1,0 +1,26 @@
+alembic/versions/d4e5f6a7b8c9_add_session_type_and_reservation_shared_fields.py
+  h_42175f19913982 1-35
+app/models/reservation.py
+  h_42175f19913982 4,48
+app/models/session_type.py
+  h_42175f19913982 4,21-23
+app/routers/reservations.py
+  h_42175f19913982 6,12,68-136,179-180,189,194-199,256,317,326-328,403,409-411,422-424,446-453,476
+app/routers/session_types.py
+  h_42175f19913982 2,4,8,10,12,24-100
+app/schemas/reservation.py
+  h_42175f19913982 18,33,41,54
+app/schemas/session_type.py
+  h_42175f19913982 7-22,27-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "997da860ca2cf5228b36fcda207ce2299b0e9e79",
+  "prompts": {},
+  "humans": {
+    "h_42175f19913982": {
+      "author": "Èric Zapater <ericzm@ext.inditex.com>"
+    }
+  }
+}
