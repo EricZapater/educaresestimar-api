@@ -15,6 +15,7 @@ class ReservationCreate(BaseModel):
     slot_id: uuid.UUID | None = None
     message: str | None = None
     status: str | None = None
+    is_shared: bool | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -29,6 +30,7 @@ class ReservationRecurringCreate(BaseModel):
     recurrence: str # "weekly" o "biweekly"
     occurrences: int = Field(default=1, ge=1, le=12)
     message: str | None = None
+    is_shared: bool | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -36,6 +38,7 @@ class ReservationRecurringCreate(BaseModel):
 class ReservationUpdate(BaseModel):
     status: str | None = None
     slot_id: uuid.UUID | None = None
+    is_shared: bool | None = None
 
 
 
@@ -48,6 +51,7 @@ class ReservationOut(BaseModel):
     slot_id: uuid.UUID | None = None
     message: str | None = None
     status: str
+    is_shared: bool | None = None
     created_at: datetime
     session_type: SessionTypeOut | None = None
     slot: SlotOut | None = None

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, Text, text, Table, Column
+from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Text, text, Table, Column
 from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -45,6 +45,7 @@ class Reservation(Base):
     )
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
+    is_shared: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
         server_default=text("now()"),

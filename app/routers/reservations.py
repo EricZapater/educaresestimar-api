@@ -3,13 +3,13 @@ import uuid
 from datetime import date, datetime, timedelta, time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, or_, func, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.models.reservation import Reservation
+from app.models.reservation import Reservation, reservation_slots
 from app.models.session_type import SessionType
 from app.models.slot import Slot
 from app.models.admin_user import AdminUser
@@ -65,6 +65,75 @@ async def _get_slots_to_occupy(db: AsyncSession, start_slot: Slot, session_type:
     return slots_to_occupy
 
 
+async def _update_slots_occupancy(
+    db: AsyncSession,
+    slots: list[Slot],
+    session_type: SessionType,
+    is_shared: bool,
+):
+    """Actualitza la disponibilitat dels slots quan són ocupats per una sessió."""
+    for s in slots:
+        if not is_shared:
+            s.is_available = False
+        else:
+            query = (
+                select(func.count(distinct(Reservation.id)))
+                .outerjoin(reservation_slots, reservation_slots.c.reservation_id == Reservation.id)
+                .where(
+                    or_(reservation_slots.c.slot_id == s.id, Reservation.slot_id == s.id),
+                    Reservation.status == "confirmed",
+                )
+            )
+            res = await db.execute(query)
+            confirmed_count = res.scalar() or 0
+            max_clients = session_type.max_clients or 1
+            if confirmed_count >= max_clients:
+                s.is_available = False
+            else:
+                s.is_available = True
+
+
+async def _recalculate_slot_availability(db: AsyncSession, slot: Slot):
+    """Recalcula is_available d'un slot quan s'allibera o es cancel·la una reserva."""
+    non_shared_query = (
+        select(func.count(distinct(Reservation.id)))
+        .outerjoin(reservation_slots, reservation_slots.c.reservation_id == Reservation.id)
+        .outerjoin(SessionType, SessionType.id == Reservation.session_type_id)
+        .where(
+            or_(reservation_slots.c.slot_id == slot.id, Reservation.slot_id == slot.id),
+            Reservation.status != "cancelled",
+            or_(
+                Reservation.is_shared == False,
+                and_(Reservation.is_shared.is_(None), SessionType.is_shared == False),
+            ),
+        )
+    )
+    res_non_shared = await db.execute(non_shared_query)
+    non_shared_count = res_non_shared.scalar() or 0
+    if non_shared_count > 0:
+        slot.is_available = False
+        return
+
+    shared_query = (
+        select(
+            func.count(distinct(Reservation.id)),
+            func.min(SessionType.max_clients),
+        )
+        .outerjoin(reservation_slots, reservation_slots.c.reservation_id == Reservation.id)
+        .outerjoin(SessionType, SessionType.id == Reservation.session_type_id)
+        .where(
+            or_(reservation_slots.c.slot_id == slot.id, Reservation.slot_id == slot.id),
+            Reservation.status == "confirmed",
+        )
+    )
+    res_shared = await db.execute(shared_query)
+    row = res_shared.first()
+    confirmed_count = row[0] if row and row[0] is not None else 0
+    min_max_clients = row[1] if row and row[1] is not None else 1
+    max_clients = min_max_clients or 1
+    slot.is_available = (confirmed_count < max_clients)
+
+
 @router.post("", response_model=ReservationOut, status_code=status.HTTP_201_CREATED)
 async def create_reservation(
     payload: ReservationCreate,
@@ -107,6 +176,8 @@ async def create_reservation(
                 detail="One or more required slots are not available for the session duration.",
             )
 
+    is_shared = payload.is_shared if payload.is_shared is not None else session_type.is_shared
+
     reservation = Reservation(
         client_name=payload.client_name,
         client_phone=payload.client_phone,
@@ -115,15 +186,18 @@ async def create_reservation(
         slot_id=payload.slot_id,
         message=payload.message,
         status=status_to_use,
+        is_shared=is_shared,
     )
     
     if slots_to_occupy:
         reservation.booked_slots = slots_to_occupy
-        for s in slots_to_occupy:
-            s.is_available = False
+        db.add(reservation)
+        await db.flush()
+        await _update_slots_occupancy(db, slots_to_occupy, session_type, is_shared)
+    else:
+        db.add(reservation)
+        await db.flush()
 
-    db.add(reservation)
-    await db.flush()
     await db.refresh(reservation, attribute_names=["session_type", "slot", "booked_slots"])
 
     # Enviar correu de confirmació al client directament si s'ha creat com a confirmat
@@ -179,6 +253,7 @@ async def create_recurring_reservation(
         )
         
     duration = session_type.duration_minutes or 30
+    is_shared = payload.is_shared if payload.is_shared is not None else session_type.is_shared
     
     # 1. Calcular les dates de les ocurrències
     dates = []
@@ -196,7 +271,6 @@ async def create_recurring_reservation(
         res = await db.execute(stmt)
         slot = res.scalar_one_or_none()
         if not slot:
-            
             # Crear el slot
             minutes = t.hour * 60 + t.minute
             end_minutes = minutes + 30
@@ -240,17 +314,18 @@ async def create_recurring_reservation(
             slot_id=slots_needed[0].id,
             message=payload.message,
             status="confirmed",
+            is_shared=is_shared,
         )
         
         reservation.booked_slots = slots_needed
-        for s in slots_needed:
-            s.is_available = False
-            
         db.add(reservation)
         created_reservations.append(reservation)
         
     await db.flush()
     
+    for res in created_reservations:
+        await _update_slots_occupancy(db, res.booked_slots, session_type, is_shared)
+
     # 3. Enviar correus de confirmació de cada ocurrència
     for res in created_reservations:
         await db.refresh(res, attribute_names=["session_type", "slot", "booked_slots"])
@@ -270,7 +345,6 @@ async def create_recurring_reservation(
             )
             
     return created_reservations
-
 
 
 @router.get("", response_model=list[ReservationOut])
@@ -326,13 +400,15 @@ async def update_reservation(
     # Estat previ per decidir si cal notificar al client
     was_already_confirmed = reservation.status == "confirmed"
     original_slot_id = reservation.slot_id
+    old_slots = list(reservation.booked_slots)
 
     # 1. Obtenir slots actualment ocupats per alliberar-los temporalment
     currently_occupying = (reservation.status != "cancelled" and reservation.slot_id is not None)
     if currently_occupying:
-        for s in reservation.booked_slots:
-            s.is_available = True
         reservation.booked_slots.clear()
+        await db.flush()
+        for s in old_slots:
+            await _recalculate_slot_availability(db, s)
 
     # 2. Aplicar els canvis del payload
     if payload.status is not None:
@@ -342,6 +418,9 @@ async def update_reservation(
                 detail=f"Invalid status. Must be one of: {', '.join(sorted(VALID_STATUSES))}",
             )
         reservation.status = payload.status
+
+    if payload.is_shared is not None:
+        reservation.is_shared = payload.is_shared
 
     if payload.slot_id is not None:
         new_slot = await db.get(Slot, payload.slot_id)
@@ -363,10 +442,15 @@ async def update_reservation(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="One or more required slots are not available for the session duration.",
             )
-        for s in new_slots:
-            s.is_available = False
-            
         reservation.booked_slots = new_slots
+        await db.flush()
+
+        effective_is_shared = (
+            reservation.is_shared
+            if reservation.is_shared is not None
+            else reservation.session_type.is_shared
+        )
+        await _update_slots_occupancy(db, new_slots, reservation.session_type, effective_is_shared)
 
         # Lògica d'enviament de correu al client
         is_now_confirmed = reservation.status == "confirmed"
@@ -389,6 +473,6 @@ async def update_reservation(
             )
 
     await db.flush()
-    await db.refresh(reservation, attribute_names=["session_type", "slot"])
+    await db.refresh(reservation, attribute_names=["session_type", "slot", "booked_slots"])
 
     return reservation
