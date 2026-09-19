@@ -1,0 +1,16 @@
+app/email.py
+  h_42175f19913982 165-236
+app/routers/reservations.py
+  h_42175f19913982 16-20,412,486-506
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "443a0d4d6899a8eab1232d574f08f3ff035daba4",
+  "prompts": {},
+  "humans": {
+    "h_42175f19913982": {
+      "author": "Èric Zapater <ericzm@ext.inditex.com>"
+    }
+  }
+}
