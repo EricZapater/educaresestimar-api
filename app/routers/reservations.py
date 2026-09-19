@@ -93,26 +93,41 @@ async def _update_slots_occupancy(
                 s.is_available = True
 
 
-async def _recalculate_slot_availability(db: AsyncSession, slot: Slot):
+async def _recalculate_slot_availability(
+    db: AsyncSession,
+    slot: Slot,
+    exclude_reservation_id: uuid.UUID | None = None,
+):
     """Recalcula is_available d'un slot quan s'allibera o es cancel·la una reserva."""
+    non_shared_conditions = [
+        or_(reservation_slots.c.slot_id == slot.id, Reservation.slot_id == slot.id),
+        Reservation.status != "cancelled",
+        or_(
+            Reservation.is_shared == False,
+            and_(Reservation.is_shared.is_(None), SessionType.is_shared == False),
+        ),
+    ]
+    if exclude_reservation_id is not None:
+        non_shared_conditions.append(Reservation.id != exclude_reservation_id)
+
     non_shared_query = (
         select(func.count(distinct(Reservation.id)))
         .outerjoin(reservation_slots, reservation_slots.c.reservation_id == Reservation.id)
         .outerjoin(SessionType, SessionType.id == Reservation.session_type_id)
-        .where(
-            or_(reservation_slots.c.slot_id == slot.id, Reservation.slot_id == slot.id),
-            Reservation.status != "cancelled",
-            or_(
-                Reservation.is_shared == False,
-                and_(Reservation.is_shared.is_(None), SessionType.is_shared == False),
-            ),
-        )
+        .where(and_(*non_shared_conditions))
     )
     res_non_shared = await db.execute(non_shared_query)
     non_shared_count = res_non_shared.scalar() or 0
     if non_shared_count > 0:
         slot.is_available = False
         return
+
+    shared_conditions = [
+        or_(reservation_slots.c.slot_id == slot.id, Reservation.slot_id == slot.id),
+        Reservation.status == "confirmed",
+    ]
+    if exclude_reservation_id is not None:
+        shared_conditions.append(Reservation.id != exclude_reservation_id)
 
     shared_query = (
         select(
@@ -121,10 +136,7 @@ async def _recalculate_slot_availability(db: AsyncSession, slot: Slot):
         )
         .outerjoin(reservation_slots, reservation_slots.c.reservation_id == Reservation.id)
         .outerjoin(SessionType, SessionType.id == Reservation.session_type_id)
-        .where(
-            or_(reservation_slots.c.slot_id == slot.id, Reservation.slot_id == slot.id),
-            Reservation.status == "confirmed",
-        )
+        .where(and_(*shared_conditions))
     )
     res_shared = await db.execute(shared_query)
     row = res_shared.first()
@@ -408,7 +420,7 @@ async def update_reservation(
         reservation.booked_slots.clear()
         await db.flush()
         for s in old_slots:
-            await _recalculate_slot_availability(db, s)
+            await _recalculate_slot_availability(db, s, exclude_reservation_id=reservation.id)
 
     # 2. Aplicar els canvis del payload
     if payload.status is not None:
