@@ -78,12 +78,19 @@ async def _recalculate_slot_availability(
     """
     query = (
         select(Reservation, SessionType)
-        .outerjoin(reservation_slots, reservation_slots.c.reservation_id == Reservation.id)
         .join(SessionType, SessionType.id == Reservation.session_type_id)
+        .outerjoin(
+            reservation_slots,
+            and_(
+                reservation_slots.c.reservation_id == Reservation.id,
+                reservation_slots.c.slot_id == slot.id,
+            ),
+        )
         .where(
             or_(reservation_slots.c.slot_id == slot.id, Reservation.slot_id == slot.id),
             Reservation.status != "cancelled",
         )
+        .distinct()
     )
     if exclude_reservation_id is not None:
         query = query.where(Reservation.id != exclude_reservation_id)
@@ -91,14 +98,19 @@ async def _recalculate_slot_availability(
     res = await db.execute(query)
     rows = res.all()
 
-    if not rows:
+    # Deduplicar reserves per ID per evitar recomptes múltiples per slots consecutius
+    unique_reservations = {}
+    for r, st in rows:
+        unique_reservations[r.id] = (r, st)
+
+    if not unique_reservations:
         slot.is_available = True
         return
 
     has_non_shared = False
     max_clients_candidates = []
 
-    for r, st in rows:
+    for r, st in unique_reservations.values():
         is_r_shared = bool(r.is_shared or st.is_shared)
         if not is_r_shared:
             has_non_shared = True
@@ -112,7 +124,7 @@ async def _recalculate_slot_availability(
 
     # Totes són compartides
     max_clients = min(max_clients_candidates) if max_clients_candidates else 1
-    current_occupants = len(rows)
+    current_occupants = len(unique_reservations)
     slot.is_available = (current_occupants < max_clients)
 
 
