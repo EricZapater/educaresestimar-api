@@ -73,12 +73,16 @@ async def _recalculate_slot_availability(
     db: AsyncSession,
     slot: Slot,
     exclude_reservation_id: uuid.UUID | None = None,
-):
+) -> dict:
     """
     Recalcula is_available d'un slot en funció de les reserves actives que l'ocupen.
-    - Si no hi ha reserves actives (status != 'cancelled'): is_available = True
-    - Si hi ha alguna reserva NO compartida (ni el tipus ni la reserva són compartits): is_available = False
-    - Si totes les reserves són compartides: is_available = (num_reserves < max_clients)
+    Retorna un diccionari amb les dades d'ocupació:
+    {
+        "is_available": bool,
+        "current_occupants": int,
+        "is_shared_occupied": bool,
+        "max_clients": int | None,
+    }
     """
     query = (
         select(Reservation, SessionType)
@@ -109,7 +113,12 @@ async def _recalculate_slot_availability(
 
     if not unique_reservations:
         slot.is_available = True
-        return
+        return {
+            "is_available": True,
+            "current_occupants": 0,
+            "is_shared_occupied": False,
+            "max_clients": None,
+        }
 
     has_non_shared = False
     max_clients_candidates = []
@@ -122,14 +131,26 @@ async def _recalculate_slot_availability(
         limit = st.max_clients if (st.max_clients and st.max_clients > 1) else (2 if r.is_shared else 1)
         max_clients_candidates.append(limit)
 
+    current_occupants = len(unique_reservations)
+
     if has_non_shared:
         slot.is_available = False
-        return
+        return {
+            "is_available": False,
+            "current_occupants": current_occupants,
+            "is_shared_occupied": False,
+            "max_clients": None,
+        }
 
     # Totes són compartides
     max_clients = min(max_clients_candidates) if max_clients_candidates else 1
-    current_occupants = len(unique_reservations)
     slot.is_available = (current_occupants < max_clients)
+    return {
+        "is_available": slot.is_available,
+        "current_occupants": current_occupants,
+        "is_shared_occupied": True,
+        "max_clients": max_clients,
+    }
 
 
 async def _update_slots_occupancy(
@@ -168,6 +189,8 @@ async def create_reservation(
             detail="Session type not found",
         )
 
+    is_shared = payload.is_shared if payload.is_shared is not None else session_type.is_shared
+
     # Validate slot_id if provided
     slots_to_occupy = []
     if payload.slot_id is not None:
@@ -185,7 +208,15 @@ async def create_reservation(
                 detail="One or more required slots are not available for the session duration.",
             )
 
-    is_shared = payload.is_shared if payload.is_shared is not None else session_type.is_shared
+        # Si la nova sessió és individual, no pot ocupar un slot que ja tingui altres reserves
+        if not is_shared:
+            for s in slots_to_occupy:
+                info = await _recalculate_slot_availability(db, s)
+                if info["current_occupants"] > 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Aquest horari té una classe compartida activa i no admet sessions individuals.",
+                    )
 
     reservation = Reservation(
         client_name=payload.client_name,

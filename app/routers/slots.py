@@ -22,9 +22,10 @@ async def list_available_slots(
     db: AsyncSession = Depends(get_db),
     from_date: date = Query(..., alias="from", description="Data inici (YYYY-MM-DD)"),
     to_date: date = Query(..., alias="to", description="Data fi (YYYY-MM-DD)"),
+    is_shared: bool | None = Query(None, description="Filtra disponibilitat per a tipus de classe compartida o individual"),
 ):
     """Retorna les franges disponibles dins el rang de dates indicat."""
-    logger.info("GET /api/slots from=%s to=%s", from_date, to_date)
+    logger.info("GET /api/slots from=%s to=%s is_shared=%s", from_date, to_date, is_shared)
     result = await db.execute(
         select(Slot)
         .where(
@@ -39,11 +40,32 @@ async def list_available_slots(
 
     # Sincronitzar la disponibilitat dinàmica de cada slot segons les reserves multi-client
     from app.routers.reservations import _recalculate_slot_availability
+    out: list[SlotOut] = []
     for s in slots:
-        await _recalculate_slot_availability(db, s)
+        info = await _recalculate_slot_availability(db, s)
+        slot_is_available = info["is_available"]
+
+        # Si es demana disponibilitat per a una classe individual (is_shared == False),
+        # qualsevol slot que ja tingui cap ocupant (encara que sigui compartit) no està disponible
+        if is_shared is False and info["current_occupants"] > 0:
+            slot_is_available = False
+
+        out.append(
+            SlotOut(
+                id=s.id,
+                date=s.date,
+                start_time=s.start_time,
+                end_time=s.end_time,
+                is_available=slot_is_available,
+                current_occupants=info["current_occupants"],
+                is_shared_occupied=info["is_shared_occupied"],
+                max_clients=info["max_clients"],
+                created_at=s.created_at,
+            )
+        )
     await db.commit()
 
-    return slots
+    return out
 
 
 @router.post("", response_model=SlotOut, status_code=status.HTTP_201_CREATED)

@@ -16,6 +16,9 @@ class SlotOut(BaseModel):
     start_time: time
     end_time: time
     is_available: bool
+    current_occupants: int = 0
+    is_shared_occupied: bool = False
+    max_clients: int | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
