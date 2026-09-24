@@ -1,0 +1,18 @@
+app/routers/reservations.py
+  h_42175f19913982 76,79-85,116-121,134-135,138-143,148-153,192-193,211-219
+app/routers/slots.py
+  h_42175f19913982 25,28,43,45-65,68
+app/schemas/slot.py
+  h_42175f19913982 19-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a76f41725e44b57fd8308b1df6c08ace7153d71c",
+  "prompts": {},
+  "humans": {
+    "h_42175f19913982": {
+      "author": "Èric Zapater <ericzm@ext.inditex.com>"
+    }
+  }
+}
