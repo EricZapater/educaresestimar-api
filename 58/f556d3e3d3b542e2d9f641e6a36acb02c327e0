@@ -1,0 +1,14 @@
+app/email.py
+  h_42175f19913982 15-22,45-46,57-65,67-71,74-115,118-120,127,164-165,169-234,239,274-275,278-283,285-289,293-344,349
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "58f556d3e3d3b542e2d9f641e6a36acb02c327e0",
+  "prompts": {},
+  "humans": {
+    "h_42175f19913982": {
+      "author": "Èric Zapater <ericzm@ext.inditex.com>"
+    }
+  }
+}
