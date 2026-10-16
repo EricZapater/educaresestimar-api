@@ -1,0 +1,28 @@
+alembic/versions/e5f6a7b8c9d0_add_is_blocked_and_block_reason_to_slots.py
+  h_42175f19913982 1-28
+app/email.py
+  h_42175f19913982 369-551
+app/main.py
+  h_42175f19913982 52,64-74
+app/models/slot.py
+  h_42175f19913982 4,26-27
+app/routers/reservations.py
+  h_42175f19913982 114-123
+app/routers/slots.py
+  h_42175f19913982 3,6,12-13,60-61,88-97,124,136-138,163-274,303
+app/scheduler.py
+  h_42175f19913982 1-185
+app/schemas/slot.py
+  h_42175f19913982 19-20,32-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9523d237b2c77b8e336e93e27347656b9e14822d",
+  "prompts": {},
+  "humans": {
+    "h_42175f19913982": {
+      "author": "Èric Zapater <ericzm@ext.inditex.com>"
+    }
+  }
+}
