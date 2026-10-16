@@ -49,7 +49,7 @@ async def log_requests(request: Request, call_next):
 
 @app.on_event("startup")
 async def startup():
-    """Executa les migracions d'Alembic automàticament a l'arrencada."""
+    """Executa les migracions d'Alembic automàticament a l'arrencada i inicia el planificador d'agenda diària."""
     logger.info("Running Alembic migrations...")
     result = subprocess.run(
         ["alembic", "upgrade", "head"],
@@ -60,6 +60,17 @@ async def startup():
         logger.error("Alembic migration failed: %s", result.stderr)
         raise RuntimeError(f"Alembic migration failed: {result.stderr}")
     logger.info("Alembic migrations completed successfully.")
+
+    import asyncio
+    from app.scheduler import daily_agenda_scheduler_loop
+    app.state.daily_scheduler_task = asyncio.create_task(daily_agenda_scheduler_loop())
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    task = getattr(app.state, "daily_scheduler_task", None)
+    if task:
+        task.cancel()
 
 
 # Register routers

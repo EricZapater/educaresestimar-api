@@ -1,16 +1,16 @@
 import logging
 import uuid
-from datetime import date, time
+from datetime import date, time, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
 from app.models.slot import Slot
-from app.models.reservation import Reservation
-from app.schemas.slot import SlotCreate, SlotOut, SlotBulkCreate
+from app.models.reservation import Reservation, reservation_slots
+from app.schemas.slot import SlotCreate, SlotOut, SlotBulkCreate, SlotBlockRange, SlotUnblockRange
 from app.utils import is_slot_blocked
 
 logger = logging.getLogger(__name__)
@@ -57,6 +57,8 @@ async def list_available_slots(
                 start_time=s.start_time,
                 end_time=s.end_time,
                 is_available=slot_is_available,
+                is_blocked=bool(s.is_blocked),
+                block_reason=s.block_reason,
                 current_occupants=info["current_occupants"],
                 is_shared_occupied=info["is_shared_occupied"],
                 max_clients=info["max_clients"],
@@ -83,7 +85,16 @@ async def create_slot(
             and_(Slot.date == payload.date, Slot.start_time == payload.start_time)
         )
     )
-    if existing.scalar_one_or_none() is not None:
+    existing_slot = existing.scalar_one_or_none()
+    if existing_slot is not None:
+        if existing_slot.is_blocked:
+            # Si estava bloquejat i l'educador l'obre manualment, el desbloquegem
+            existing_slot.is_blocked = False
+            existing_slot.block_reason = None
+            existing_slot.is_available = True
+            await db.flush()
+            await db.refresh(existing_slot)
+            return existing_slot
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A slot with this date and start_time already exists",
@@ -110,7 +121,7 @@ async def create_slots_bulk(
     logger.info("POST /api/slots/bulk count=%s", len(payload.slots))
     created_slots = []
     for s_payload in payload.slots:
-        # Ignorar si està bloquejat
+        # Ignorar si està bloquejat per defecte
         if is_slot_blocked(s_payload.date, s_payload.start_time):
             continue
 
@@ -122,8 +133,10 @@ async def create_slots_bulk(
         )
         existing_slot = existing.scalar_one_or_none()
         if existing_slot is not None:
+            # Si està bloquejat manualment per l'educador amb un motiu, l'ignorem en l'obertura en bloc
+            if existing_slot.is_blocked:
+                continue
             # Si ja existeix, assegurem que estigui disponible si no té reserves actives
-            from app.models.reservation import reservation_slots
             reservations = await db.execute(
                 select(reservation_slots).where(reservation_slots.c.slot_id == existing_slot.id).limit(1)
             )
@@ -147,6 +160,118 @@ async def create_slots_bulk(
     return created_slots
 
 
+@router.post("/block", response_model=list[SlotOut], status_code=status.HTTP_201_CREATED)
+async def block_slots_range(
+    payload: SlotBlockRange,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Bloqueja un rang d'hores (en trams de 30 min) per a una data amb un motiu personalitzat."""
+    logger.info("POST /api/slots/block date=%s %s-%s reason=%s", payload.date, payload.start_time, payload.end_time, payload.reason)
+
+    dt_current = datetime.combine(payload.date, payload.start_time)
+    dt_end = datetime.combine(payload.date, payload.end_time)
+
+    if dt_end <= dt_current:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="L'hora de finalització ha de ser posterior a l'hora d'inici.",
+        )
+
+    intervals: list[tuple[time, time]] = []
+    while dt_current < dt_end:
+        next_dt = dt_current + timedelta(minutes=30)
+        intervals.append((dt_current.time(), next_dt.time()))
+        dt_current = next_dt
+
+    reason_clean = (payload.reason or "").strip() or "No disponible"
+    blocked_slots: list[Slot] = []
+
+    for st_time, et_time in intervals:
+        existing_res = await db.execute(
+            select(Slot).where(
+                and_(Slot.date == payload.date, Slot.start_time == st_time)
+            )
+        )
+        existing_slot = existing_res.scalar_one_or_none()
+
+        if existing_slot is not None:
+            # Comprovar si té reserves actives (confirmed o pending)
+            active_res = await db.execute(
+                select(Reservation)
+                .outerjoin(reservation_slots, reservation_slots.c.reservation_id == Reservation.id)
+                .where(
+                    or_(
+                        reservation_slots.c.slot_id == existing_slot.id,
+                        Reservation.slot_id == existing_slot.id,
+                    ),
+                    Reservation.status != "cancelled",
+                )
+                .limit(1)
+            )
+            if active_res.scalar_one_or_none() is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"La franja de les {st_time.strftime('%H:%M')} ja té una reserva activa i no es pot bloquejar.",
+                )
+
+            existing_slot.is_blocked = True
+            existing_slot.is_available = False
+            existing_slot.block_reason = reason_clean
+            blocked_slots.append(existing_slot)
+        else:
+            new_slot = Slot(
+                date=payload.date,
+                start_time=st_time,
+                end_time=et_time,
+                is_available=False,
+                is_blocked=True,
+                block_reason=reason_clean,
+            )
+            db.add(new_slot)
+            blocked_slots.append(new_slot)
+
+    await db.flush()
+    for s in blocked_slots:
+        await db.refresh(s)
+    return blocked_slots
+
+
+@router.post("/unblock", status_code=status.HTTP_204_NO_CONTENT)
+async def unblock_slots_range(
+    payload: SlotUnblockRange,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Desbloqueja una franja o un rang de franges bloquejades manualment."""
+    logger.info("POST /api/slots/unblock date=%s %s-%s", payload.date, payload.start_time, payload.end_time)
+
+    query = select(Slot).where(
+        Slot.date == payload.date,
+        Slot.is_blocked.is_(True),
+    )
+    if payload.end_time is not None:
+        query = query.where(
+            Slot.start_time >= payload.start_time,
+            Slot.start_time < payload.end_time,
+        )
+    else:
+        query = query.where(Slot.start_time == payload.start_time)
+
+    result = await db.execute(query)
+    slots_to_unblock = list(result.scalars().all())
+
+    for s in slots_to_unblock:
+        # Check if any reservations reference this slot
+        res_check = await db.execute(
+            select(reservation_slots).where(reservation_slots.c.slot_id == s.id).limit(1)
+        )
+        if res_check.first() is not None:
+            s.is_blocked = False
+            s.block_reason = None
+        else:
+            await db.delete(s)
+
 
 @router.delete("/{slot_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_slot(
@@ -165,7 +290,6 @@ async def delete_slot(
         )
 
     # Check if any reservations reference this slot
-    from app.models.reservation import reservation_slots
     reservations = await db.execute(
         select(reservation_slots).where(reservation_slots.c.slot_id == slot_id).limit(1)
     )
@@ -176,3 +300,4 @@ async def delete_slot(
         )
 
     await db.delete(slot)
+

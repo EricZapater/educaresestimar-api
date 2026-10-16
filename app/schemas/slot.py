@@ -16,6 +16,8 @@ class SlotOut(BaseModel):
     start_time: time
     end_time: time
     is_available: bool
+    is_blocked: bool = False
+    block_reason: str | None = None
     current_occupants: int = 0
     is_shared_occupied: bool = False
     max_clients: int | None = None
@@ -26,4 +28,18 @@ class SlotOut(BaseModel):
 
 class SlotBulkCreate(BaseModel):
     slots: list[SlotCreate]
+
+
+class SlotBlockRange(BaseModel):
+    date: date
+    start_time: time
+    end_time: time
+    reason: str | None = None
+
+
+class SlotUnblockRange(BaseModel):
+    date: date
+    start_time: time
+    end_time: time | None = None
+
 

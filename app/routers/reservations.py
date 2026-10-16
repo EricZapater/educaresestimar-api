@@ -111,6 +111,16 @@ async def _recalculate_slot_availability(
     for r, st in rows:
         unique_reservations[r.id] = (r, st)
 
+    # Si el slot està bloquejat per l'educador amb un motiu, mai està disponible
+    if slot.is_blocked:
+        slot.is_available = False
+        return {
+            "is_available": False,
+            "current_occupants": len(unique_reservations),
+            "is_shared_occupied": False,
+            "max_clients": None,
+        }
+
     if not unique_reservations:
         slot.is_available = True
         return {

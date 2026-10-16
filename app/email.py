@@ -366,3 +366,186 @@ def send_client_cancellation_email(
     except Exception as e:
         logger.error(f"Failed to send cancellation email to client: {str(e)}")
 
+
+def send_daily_agenda_email(
+    date_formatted: str,
+    confirmed_items: list[dict],
+    pending_items: list[dict],
+    blocked_items: list[dict],
+    admin_emails: list[str],
+):
+    """
+    Envia un correu matinal (08:00h) amb el resum de l'agenda del dia a l'educador i als administradors (en CCO).
+    """
+    if not SMTP_HOST or not SMTP_FROM_EMAIL:
+        logger.warning("SMTP configuration not fully set. Skipping daily agenda email.")
+        return
+
+    if not admin_emails:
+        logger.info("No admin emails to notify for daily agenda.")
+        return
+
+    msg = EmailMessage()
+    msg["Subject"] = f"📅 Agenda del dia ({date_formatted}) · Educar és Estimar"
+    msg["From"] = _get_from_header()
+    msg["To"] = SMTP_FROM_EMAIL
+    msg["Bcc"] = ", ".join(admin_emails)
+
+    # Construir secció de sessions confirmades
+    if confirmed_items:
+        rows_html = ""
+        for item in confirmed_items:
+            badge_html = (
+                f'<span style="display:inline-block;background:#f3e8ff;color:#6b21a8;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600;margin-left:6px;">👥 Grup</span>'
+                if item.get("is_shared")
+                else ""
+            )
+            notes_html = (
+                f'<div style="font-size:12px;color:#718096;margin-top:4px;font-style:italic;">💬 "{item["message"]}"</div>'
+                if item.get("message")
+                else ""
+            )
+            rows_html += f"""
+            <tr>
+              <td style="padding: 12px 14px; border-bottom: 1px solid #edf2f7; font-size: 13px; font-weight: 700; color: #137333; white-space: nowrap; vertical-align: top; width: 110px;">
+                {item["time_range"]}
+              </td>
+              <td style="padding: 12px 14px; border-bottom: 1px solid #edf2f7; font-size: 13px; color: #1a202c; vertical-align: top;">
+                <div style="font-weight: 600;">{item["client_name"]} <span style="font-weight:normal;color:#4a5568;">({item["client_phone"]})</span></div>
+                <div style="font-size: 12px; color: #4a5568; margin-top: 2px;">{item["session_title"]}{badge_html}</div>
+                {notes_html}
+              </td>
+            </tr>
+            """
+        confirmed_section_html = f"""
+        <h3 style="font-size: 15px; color: #1a202c; margin: 20px 0 10px; font-weight: 600;">
+          ✅ Sessions confirmades per avui ({len(confirmed_items)})
+        </h3>
+        <table style="width: 100%; border-collapse: collapse; background-color: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 20px;">
+          {rows_html}
+        </table>
+        """
+    else:
+        confirmed_section_html = """
+        <div style="padding: 16px; background-color: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 20px; text-align: center; color: #718096; font-size: 14px;">
+          Avui no hi ha cap sessió confirmada programada a l'agenda.
+        </div>
+        """
+
+    # Construir secció de bloquejos personals
+    blocked_section_html = ""
+    if blocked_items:
+        b_rows = ""
+        for b in blocked_items:
+            b_rows += f"""
+            <tr>
+              <td style="padding: 10px 14px; border-bottom: 1px solid #fed7d7; font-size: 13px; font-weight: 700; color: #c53030; white-space: nowrap; width: 110px;">
+                {b["time_range"]}
+              </td>
+              <td style="padding: 10px 14px; border-bottom: 1px solid #fed7d7; font-size: 13px; color: #742a2a;">
+                🔒 {b["reason"]}
+              </td>
+            </tr>
+            """
+        blocked_section_html = f"""
+        <h3 style="font-size: 15px; color: #9b2c2c; margin: 20px 0 10px; font-weight: 600;">
+          🔒 Franges bloquejades avui ({len(blocked_items)})
+        </h3>
+        <table style="width: 100%; border-collapse: collapse; background-color: #fff5f5; border-radius: 8px; border: 1px solid #feb2b2; margin-bottom: 20px;">
+          {b_rows}
+        </table>
+        """
+
+    # Construir secció de sol·licituds pendents
+    pending_section_html = ""
+    if pending_items:
+        p_rows = ""
+        for p in pending_items:
+            p_rows += f"""
+            <tr>
+              <td style="padding: 10px 14px; border-bottom: 1px solid #feebc8; font-size: 12px; font-weight: 600; color: #b7791f;">
+                {p["client_name"]} ({p["client_phone"]}) · {p["session_title"]}
+              </td>
+              <td style="padding: 10px 14px; border-bottom: 1px solid #feebc8; font-size: 12px; color: #744210; text-align: right;">
+                {p["slot_info"]}
+              </td>
+            </tr>
+            """
+        pending_section_html = f"""
+        <h3 style="font-size: 15px; color: #b7791f; margin: 20px 0 10px; font-weight: 600;">
+          ⏳ Sol·licituds pendents de validar ({len(pending_items)})
+        </h3>
+        <table style="width: 100%; border-collapse: collapse; background-color: #fffff0; border-radius: 8px; border: 1px solid #fbd38d; margin-bottom: 20px;">
+          {p_rows}
+        </table>
+        """
+
+    body_html = f"""
+    <!DOCTYPE html>
+    <html lang="ca">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Agenda del dia · Educar és Estimar</title>
+      </head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #2d3748; background-color: #f7fafc; margin: 0; padding: 24px;">
+        <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); border: 1px solid #e2e8f0; margin: 0 auto;">
+          <tr>
+            <td style="padding: 28px 32px 20px; text-align: center; border-bottom: 1px solid #edf2f7; background-color: #ffffff;">
+              <img src="https://educaresestimar.cat/logo.png" alt="Educar és Estimar" style="height: 60px; max-height: 60px; width: auto; display: block; margin: 0 auto 10px;" />
+              <h1 style="font-family: Georgia, serif; font-size: 21px; color: #2d3748; margin: 0; font-weight: normal;">Educar és Estimar</h1>
+              <p style="font-size: 12px; color: #718096; margin: 4px 0 0 0;">Resum diari d'Agenda · {date_formatted}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 28px 32px;">
+              <h2 style="font-family: Georgia, serif; color: #1a202c; font-size: 19px; margin-top: 0; margin-bottom: 8px; font-weight: normal;">Bon dia! 🐾</h2>
+              <p style="font-size: 14px; color: #4a5568; margin-top: 0; margin-bottom: 20px;">
+                Aquí tens la planificació de l'agenda d'avui (<strong>{date_formatted}</strong>):
+              </p>
+
+              {confirmed_section_html}
+              {blocked_section_html}
+              {pending_section_html}
+
+              <div style="text-align: center; margin-top: 28px;">
+                <a href="https://educaresestimar.cat/agenda" target="_blank" style="display: inline-block; background-color: #2d3748; color: #ffffff; padding: 10px 24px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 500;">
+                  Obrir l'Agenda Completa
+                </a>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 20px 32px; background-color: #f8fafc; border-top: 1px solid #edf2f7; text-align: center;">
+              <p style="font-size: 12px; color: #a0aec0; margin: 0;">Enviament automàtic diari (08:00h) · Educar és Estimar</p>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+    """
+
+    msg.set_content(
+        f"Bon dia! Agenda del dia {date_formatted} a Educar és Estimar: "
+        f"{len(confirmed_items)} sessions confirmades, {len(blocked_items)} bloquejos i {len(pending_items)} sol·licituds pendents."
+    )
+    msg.add_alternative(body_html, subtype="html")
+
+    try:
+        port = int(SMTP_PORT)
+        if port == 465:
+            with smtplib.SMTP_SSL(SMTP_HOST, port) as server:
+                if SMTP_USER and SMTP_PASSWORD:
+                    server.login(SMTP_USER, SMTP_PASSWORD)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(SMTP_HOST, port) as server:
+                server.starttls()
+                if SMTP_USER and SMTP_PASSWORD:
+                    server.login(SMTP_USER, SMTP_PASSWORD)
+                server.send_message(msg)
+        logger.info(f"Daily agenda email sent to {len(admin_emails)} admins for {date_formatted}.")
+    except Exception as e:
+        logger.error(f"Failed to send daily agenda email: {str(e)}")
+
+

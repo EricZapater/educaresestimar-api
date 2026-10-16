@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, time, datetime
 
-from sqlalchemy import Boolean, Date, Time, UniqueConstraint, text
+from sqlalchemy import Boolean, Date, Time, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,6 +23,8 @@ class Slot(Base):
     start_time: Mapped[time] = mapped_column(Time, nullable=False)
     end_time: Mapped[time] = mapped_column(Time, nullable=False)
     is_available: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    is_blocked: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    block_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
         server_default=text("now()"),
