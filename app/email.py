@@ -549,3 +549,237 @@ def send_daily_agenda_email(
         logger.error(f"Failed to send daily agenda email: {str(e)}")
 
 
+def _deliver_smtp_message(msg: EmailMessage, log_label: str) -> None:
+    try:
+        port = int(SMTP_PORT)
+        if port == 465:
+            with smtplib.SMTP_SSL(SMTP_HOST, port) as server:
+                if SMTP_USER and SMTP_PASSWORD:
+                    server.login(SMTP_USER, SMTP_PASSWORD)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(SMTP_HOST, port) as server:
+                server.starttls()
+                if SMTP_USER and SMTP_PASSWORD:
+                    server.login(SMTP_USER, SMTP_PASSWORD)
+                server.send_message(msg)
+        logger.info("Email sent (%s).", log_label)
+    except Exception as e:
+        logger.error("Failed to send email (%s): %s", log_label, str(e))
+
+
+def send_password_reset_email(client_name: str, client_email: str, reset_url: str) -> None:
+    """Envia l'enllaç per restablir la contrasenya al client registrat."""
+    if not SMTP_HOST or not SMTP_FROM_EMAIL:
+        logger.warning("SMTP configuration not fully set. Skipping password reset email.")
+        return
+
+    msg = EmailMessage()
+    msg["Subject"] = "Restablir contrasenya · Educar és Estimar"
+    msg["From"] = _get_from_header()
+    msg["To"] = client_email
+
+    body_html = f"""
+    <!DOCTYPE html>
+    <html lang="ca">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Restablir contrasenya · Educar és Estimar</title>
+      </head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #2d3748; background-color: #f7fafc; margin: 0; padding: 24px;">
+        <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 580px; background-color: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; margin: 0 auto;">
+          <tr>
+            <td style="padding: 32px 32px 24px; text-align: center; border-bottom: 1px solid #edf2f7;">
+              <img src="https://educaresestimar.cat/logo.png" alt="Educar és Estimar" style="height: 64px; width: auto; display: block; margin: 0 auto 12px;" />
+              <h1 style="font-family: Georgia, serif; font-size: 22px; color: #2d3748; margin: 0; font-weight: normal;">Educar és Estimar</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px;">
+              <h2 style="font-family: Georgia, serif; color: #1a202c; font-size: 20px; margin-top: 0; margin-bottom: 12px; font-weight: normal;">Hola {client_name},</h2>
+              <p style="font-size: 14px; color: #4a5568;">Hem rebut una sol·licitud per restablir la contrasenya del teu compte a <strong>Educar és Estimar</strong>.</p>
+              <div style="text-align: center; margin: 28px 0;">
+                <a href="{reset_url}" target="_blank" style="display: inline-block; background-color: #2d3748; color: #ffffff; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600;">
+                  Crear nova contrasenya
+                </a>
+              </div>
+              <p style="font-size: 12px; color: #718096; margin-bottom: 0;">Aquest enllaç caduca en 30 minuts. Si no has demanat aquest canvi, pots ignorar aquest correu amb total tranquil·litat.</p>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+    """
+    msg.set_content(f"Hola {client_name}, pots crear una nova contrasenya per al teu compte d'Educar és Estimar aquí: {reset_url}")
+    msg.add_alternative(body_html, subtype="html")
+    _deliver_smtp_message(msg, f"password_reset:{client_email}")
+
+
+def send_client_self_cancellation_notification(
+    client_name: str,
+    client_email: str | None,
+    client_phone: str,
+    session_title: str,
+    date_str: str,
+    start_time: str,
+    admin_emails: list[str],
+) -> None:
+    """Notifica a l'educador/admins que un client ha cancel·lat una sessió des de la seva àrea privada."""
+    if not SMTP_HOST or not SMTP_FROM_EMAIL or not admin_emails:
+        return
+
+    msg = EmailMessage()
+    msg["Subject"] = f"⚠️ Reserva cancel·lada pel client · {client_name} · Educar és Estimar"
+    msg["From"] = _get_from_header()
+    msg["To"] = SMTP_FROM_EMAIL
+    msg["Bcc"] = ", ".join(admin_emails)
+
+    body_html = f"""
+    <!DOCTYPE html>
+    <html lang="ca">
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #2d3748; background-color: #f7fafc; margin: 0; padding: 24px;">
+        <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 580px; background-color: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; margin: 0 auto;">
+          <tr>
+            <td style="padding: 24px 32px; text-align: center; border-bottom: 1px solid #edf2f7;">
+              <img src="https://educaresestimar.cat/logo.png" alt="Educar és Estimar" style="height: 56px; width: auto; display: block; margin: 0 auto 8px;" />
+              <h1 style="font-family: Georgia, serif; font-size: 20px; color: #2d3748; margin: 0; font-weight: normal;">Educar és Estimar</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 28px 32px;">
+              <div style="display: inline-block; background-color: #fff5f5; color: #c53030; font-weight: bold; font-size: 12px; padding: 4px 12px; border-radius: 16px; margin-bottom: 14px;">
+                Cancel·lació amb +48h d'antelació
+              </div>
+              <p style="font-size: 14px; color: #4a5568; margin-top: 0;">El client <strong>{client_name}</strong> ({client_phone}{f' · {client_email}' if client_email else ''}) ha cancel·lat la següent sessió des de l'àrea de client, i la franja ha quedat novament alliberada:</p>
+              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px; font-size: 14px;">
+                <div><strong>Sessió:</strong> {session_title}</div>
+                <div><strong>Data i hora:</strong> {date_str} a les {start_time}</div>
+              </div>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+    """
+    msg.set_content(f"El client {client_name} ({client_phone}) ha cancel·lat la reserva de {session_title} del dia {date_str} a les {start_time}.")
+    msg.add_alternative(body_html, subtype="html")
+    _deliver_smtp_message(msg, f"self_cancel:{client_name}")
+
+
+def send_series_admin_notification(
+    client_name: str,
+    client_email: str | None,
+    client_phone: str,
+    message: str | None,
+    session_title: str,
+    dates_list: list[str],
+    admin_emails: list[str],
+) -> None:
+    """Envia un sol correu resum a l'educador quan un client sol·licita una sèrie periòdica."""
+    if not SMTP_HOST or not SMTP_FROM_EMAIL or not admin_emails:
+        return
+
+    msg = EmailMessage()
+    msg["Subject"] = f"🔁 Nova sèrie periòdica ({len(dates_list)} sessions) · {client_name} · Educar és Estimar"
+    msg["From"] = _get_from_header()
+    msg["To"] = SMTP_FROM_EMAIL
+    msg["Bcc"] = ", ".join(admin_emails)
+
+    items_html = "".join(f"<li style='margin: 4px 0;'>{d}</li>" for d in dates_list)
+    safe_message = message if message else "-"
+
+    body_html = f"""
+    <!DOCTYPE html>
+    <html lang="ca">
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #2d3748; background-color: #f7fafc; margin: 0; padding: 24px;">
+        <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; margin: 0 auto;">
+          <tr>
+            <td style="padding: 24px 32px; text-align: center; border-bottom: 1px solid #edf2f7;">
+              <img src="https://educaresestimar.cat/logo.png" alt="Educar és Estimar" style="height: 56px; width: auto; display: block; margin: 0 auto 8px;" />
+              <h1 style="font-family: Georgia, serif; font-size: 20px; color: #2d3748; margin: 0; font-weight: normal;">Educar és Estimar</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 28px 32px;">
+              <h2 style="font-family: Georgia, serif; font-size: 18px; margin-top: 0;">Nova sol·licitud de sèrie periòdica ({len(dates_list)} sessions)</h2>
+              <p style="font-size: 14px; color: #4a5568;"><strong>Client:</strong> {client_name} ({client_phone}{f' · {client_email}' if client_email else ''})<br/><strong>Sessió:</strong> {session_title}<br/><strong>Missatge:</strong> {safe_message}</p>
+              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 20px; font-size: 13px;">
+                <strong>Dates sol·licitades:</strong>
+                <ul style="margin: 8px 0 0; padding-left: 18px;">{items_html}</ul>
+              </div>
+              <div style="text-align: center; margin-top: 24px;">
+                <a href="https://educaresestimar.cat/agenda" target="_blank" style="display: inline-block; background-color: #2d3748; color: #ffffff; padding: 10px 24px; border-radius: 8px; text-decoration: none; font-size: 14px;">Obrir l'Agenda per validar la sèrie</a>
+              </div>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+    """
+    msg.set_content(f"Nova sèrie periòdica de {client_name} ({len(dates_list)} sessions de {session_title}): " + ", ".join(dates_list))
+    msg.add_alternative(body_html, subtype="html")
+    _deliver_smtp_message(msg, f"series_admin:{client_name}")
+
+
+def send_series_client_status_email(
+    client_name: str,
+    client_email: str,
+    session_title: str,
+    dates_list: list[str],
+    approved: bool,
+) -> None:
+    """Envia un sol correu resum al client quan l'educador aprova o rebutja una sèrie periòdica."""
+    if not SMTP_HOST or not SMTP_FROM_EMAIL or not client_email:
+        return
+
+    msg = EmailMessage()
+    msg["From"] = _get_from_header()
+    msg["To"] = client_email
+
+    items_html = "".join(f"<li style='margin: 5px 0;'>{d}</li>" for d in dates_list)
+
+    if approved:
+        msg["Subject"] = f"Confirmació de Sèrie de Reserves ({len(dates_list)} sessions) · Educar és Estimar"
+        badge = '<div style="display:inline-block;background-color:#e6f4ea;color:#137333;font-weight:bold;font-size:12px;padding:4px 12px;border-radius:16px;margin-bottom:16px;">✓ Sèrie confirmada</div>'
+        intro = f"Des d'<strong>Educar és Estimar</strong> ens complau confirmar-te les <strong>{len(dates_list)} sessions</strong> de <strong>{session_title}</strong>:"
+        outro = "Pots consultar o gestionar les teves sessions en qualsevol moment des de la teva àrea de client a www.educaresestimar.cat."
+    else:
+        msg["Subject"] = "Estat de la teva sol·licitud de sèrie periòdica · Educar és Estimar"
+        badge = ""
+        intro = f"Des d'<strong>Educar és Estimar</strong> t'informem que, per motius de disponibilitat d'agenda, no ha estat possible confirmar la sèrie sol·licitada de <strong>{session_title}</strong>:"
+        outro = "Pots accedir de nou a www.educaresestimar.cat/reserva per escollir un altre horari o posar-te en contacte amb nosaltres."
+
+    body_html = f"""
+    <!DOCTYPE html>
+    <html lang="ca">
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #2d3748; background-color: #f7fafc; margin: 0; padding: 24px;">
+        <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 580px; background-color: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; margin: 0 auto;">
+          <tr>
+            <td style="padding: 32px 32px 24px; text-align: center; border-bottom: 1px solid #edf2f7;">
+              <img src="https://educaresestimar.cat/logo.png" alt="Educar és Estimar" style="height: 68px; width: auto; display: block; margin: 0 auto 12px;" />
+              <h1 style="font-family: Georgia, serif; font-size: 22px; color: #2d3748; margin: 0; font-weight: normal;">Educar és Estimar</h1>
+              <p style="font-size: 13px; color: #718096; margin: 4px 0 0 0;">Educació Canina Amable</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px;">
+              {badge}
+              <h2 style="font-family: Georgia, serif; color: #1a202c; font-size: 20px; margin-top: 0;">Hola {client_name},</h2>
+              <p style="font-size: 15px; color: #4a5568;">{intro}</p>
+              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 20px; font-size: 14px; margin-bottom: 20px;">
+                <ul style="margin: 0; padding-left: 18px;">{items_html}</ul>
+              </div>
+              <p style="font-size: 14px; color: #4a5568; margin-bottom: 0;">{outro}</p>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+    """
+    msg.set_content(f"Hola {client_name}, estat de la sèrie ({session_title}): " + ", ".join(dates_list))
+    msg.add_alternative(body_html, subtype="html")
+    _deliver_smtp_message(msg, f"series_client:{client_email}:{'approved' if approved else 'rejected'}")
+
+
+

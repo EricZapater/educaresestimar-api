@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
-from sqlalchemy import Boolean, Integer, Text, text
+from sqlalchemy import Boolean, Integer, Numeric, Text, text
 from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,6 +22,11 @@ class SessionType(Base):
     is_shared: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     max_clients: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    default_price: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        server_default=text("0"),
+        nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
         server_default=text("now()"),

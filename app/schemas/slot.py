@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, time, datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SlotCreate(BaseModel):
@@ -41,5 +41,10 @@ class SlotUnblockRange(BaseModel):
     date: date
     start_time: time
     end_time: time | None = None
+
+
+class SlotReplicateWeek(BaseModel):
+    source_week_start: date
+    weeks_ahead: int = Field(default=4, ge=1, le=12)
 
 

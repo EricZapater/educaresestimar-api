@@ -10,6 +10,7 @@ class SessionTypeCreate(BaseModel):
     is_shared: bool = False
     max_clients: int = 1
     description: str | None = None
+    default_price: float = 0.0
 
 
 class SessionTypeUpdate(BaseModel):
@@ -18,9 +19,10 @@ class SessionTypeUpdate(BaseModel):
     is_shared: bool | None = None
     max_clients: int | None = None
     description: str | None = None
+    default_price: float | None = None
 
 
-class SessionTypeOut(BaseModel):
+class SessionTypePublicOut(BaseModel):
     id: uuid.UUID
     name: str
     duration_minutes: int | None = None
@@ -30,3 +32,7 @@ class SessionTypeOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class SessionTypeOut(SessionTypePublicOut):
+    default_price: float = 0.0

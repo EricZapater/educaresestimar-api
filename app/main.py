@@ -74,12 +74,14 @@ async def shutdown():
 
 
 # Register routers
-from app.routers import session_types, slots, reservations, auth  # noqa: E402
+from app.routers import session_types, slots, reservations, auth, clients, client_portal  # noqa: E402
 
 app.include_router(auth.router)
 app.include_router(session_types.router)
 app.include_router(slots.router)
 app.include_router(reservations.router)
+app.include_router(clients.router)
+app.include_router(client_portal.router)
 
 
 @app.get("/", tags=["Health"])

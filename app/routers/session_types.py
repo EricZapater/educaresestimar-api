@@ -1,33 +1,47 @@
 import logging
 import uuid
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import get_current_admin, get_optional_current_user
 from app.database import get_db
 from app.models.reservation import Reservation
 from app.models.session_type import SessionType
-from app.schemas.session_type import SessionTypeCreate, SessionTypeOut, SessionTypeUpdate
+from app.schemas.session_type import (
+    SessionTypeCreate,
+    SessionTypeOut,
+    SessionTypePublicOut,
+    SessionTypeUpdate,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/session-types", tags=["Session Types"])
 
 
-@router.get("", response_model=list[SessionTypeOut])
-async def list_session_types(db: AsyncSession = Depends(get_db)):
-    """Retorna la llista de tots els tipus de sessió."""
+@router.get("")
+async def list_session_types(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict | None = Depends(get_optional_current_user),
+):
+    """Retorna els tipus de sessió. El camp default_price només s'exposa a l'administrador."""
     logger.info("GET /api/session-types")
     result = await db.execute(select(SessionType).order_by(SessionType.name))
-    return result.scalars().all()
+    items = list(result.scalars().all())
+
+    is_admin = bool(current_user and current_user.get("role", "admin") == "admin")
+    if is_admin:
+        return [SessionTypeOut.model_validate(item) for item in items]
+    return [SessionTypePublicOut.model_validate(item) for item in items]
 
 
 @router.post("", response_model=SessionTypeOut, status_code=status.HTTP_201_CREATED)
 async def create_session_type(
     payload: SessionTypeCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_admin),
 ):
     """Crea un nou tipus de sessió."""
     logger.info("POST /api/session-types name=%s", payload.name)
@@ -37,6 +51,7 @@ async def create_session_type(
         is_shared=payload.is_shared,
         max_clients=payload.max_clients,
         description=payload.description,
+        default_price=Decimal(str(round(payload.default_price or 0.0, 2))),
     )
     db.add(session_type)
     await db.flush()
@@ -49,7 +64,7 @@ async def update_session_type(
     session_type_id: uuid.UUID,
     payload: SessionTypeUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_admin),
 ):
     """Actualitza un tipus de sessió existent."""
     logger.info("PATCH /api/session-types/%s", session_type_id)
@@ -61,6 +76,9 @@ async def update_session_type(
         )
 
     update_data = payload.model_dump(exclude_unset=True)
+    if "default_price" in update_data and update_data["default_price"] is not None:
+        update_data["default_price"] = Decimal(str(round(update_data["default_price"], 2)))
+
     for key, value in update_data.items():
         setattr(session_type, key, value)
 
@@ -73,7 +91,7 @@ async def update_session_type(
 async def delete_session_type(
     session_type_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_admin),
 ):
     """Elimina un tipus de sessió. Retorna 409 si té reserves actives associades."""
     logger.info("DELETE /api/session-types/%s", session_type_id)
