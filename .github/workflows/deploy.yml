@@ -85,3 +85,20 @@ jobs:
             cd /home/${{ secrets.SSH_USER }}/educaresestimar
             docker compose ps educaresestimar-api
             echo "🔗 API disponible a: https://api.educaresestimar.cat/docs"
+
+      - name: 🚀 Registrar Desplegament a RawCraft Monitor
+        if: always()
+        run: |
+          curl -fsSL -X POST https://api.monitor.ericzapater.cat/api/v1/deploys \
+            -H "Content-Type: application/json" \
+            -H "X-Agent-Key: ${{ secrets.RAWCRAFT_API_KEY }}" \
+            -d '{
+              "product_name": "educaresestimar-back",
+              "environment": "production",
+              "version": "${{ github.ref_name }}",
+              "commit_sha": "${{ github.sha }}",
+              "commit_message": '"$(echo "${{ github.event.head_commit.message }}" | jq -sR .)"',
+              "branch": "${{ github.ref_name }}",
+              "deployed_by": "${{ github.actor }}",
+              "status": "${{ job.status == 'success' && 'SUCCESS' || 'FAILED' }}"
+            }'
